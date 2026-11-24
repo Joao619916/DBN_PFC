@@ -30,7 +30,7 @@ Cada script salva os resultados na própria pasta.
 - **Figuras 5.2 a 5.7** — cada canal gera um arquivo `_teorica.dat` com as curvas analíticas e um `_MC.dat` com as estimativas de Monte Carlo. Por exemplo, a Figura 5.2 gera `figura_5_2_AWGN_teorica.dat` e `figura_5_2_AWGN_MC.dat`. Quando uma simulação termina com zero erros observados, o arquivo registra zero e o gráfico omite o ponto no eixo logarítmico.
 - **Tabelas** — `tabela_BEP_AWGN.csv`, `tabela_BEP_LoS.csv` e `tabela_BEP_nLoS.csv`. A indicação `>10000` significa que a modulação não atingiu a meta de BEP até o limite de 10 000 amostras por símbolo.
 
-Para usar os dados com o TikZ original do TCC, ajuste os nomes dos arquivos e das colunas no LaTeX. Os scripts também geram PDFs que podem ser incluídos diretamente no documento.
+As Figuras 5.1 a 5.7 do PFC foram geradas em LaTeX com TikZ a partir dos arquivos `.dat` exportados pelo MATLAB. Para usar os dados com o TikZ original do TCC, ajuste os nomes dos arquivos e das colunas no LaTeX. Os scripts também geram PDFs que podem ser incluídos diretamente no documento.
 
 ## Referência da DBN
 
