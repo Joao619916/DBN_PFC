@@ -1,172 +1,138 @@
 clear; clc; close all;
 rng(20261114,'twister');
 
-% 1. Parametros da simulacao
-N_valores = [20 100];
+% 1. Parametros da Figura 5.2
 SNR_dB = -10:0.25:10;
-SNR_linear = 10.^(SNR_dB/10);
-SNR_MC = -10:1:10;
+pontos_MC = -10:1:10;
+N_valores = [20 100];
 N_bits = 1e8;
-bloco = 2e5;  % Numero de bits por bloco para economizar memoria
+bloco = 2e5;
 alpha = 10;
-
-% Potencia do ruido do canal igual a 1
-% Variancias recebidas para os bits 0 e 1 da NoiseMod
-v0_NoiseMod = 1 + 2*SNR_linear/(1+alpha);
-v1_NoiseMod = 1 + 2*alpha*SNR_linear/(1+alpha);
-
-% Variancias recebidas para os bits 0 e 1 da OODN
-v0_OODN = ones(size(SNR_linear));
-v1_OODN = 1 + 2*SNR_linear;
-
-% 2. Calcular os limiares otimos dos detectores de energia
-lambda_NoiseMod = v0_NoiseMod.*v1_NoiseMod.* ...
-    log(v1_NoiseMod./v0_NoiseMod)./(v1_NoiseMod-v0_NoiseMod);
-lambda_OODN = v0_OODN.*v1_OODN.* ...
-    log(v1_OODN./v0_OODN)./(v1_OODN-v0_OODN);
-
-% Pontos da curva teorica que correspondem aos pontos de Monte Carlo
-pontos = 1:4:length(SNR_dB);
-
-% Cores e marcadores das curvas: NoiseMod, OODN e DBN
-cores = [228 117 0; 32 147 46; 19 112 185; ...
-         174 37 65; 114 48 129; 204 77 25]/255;
-nomes = {'NoiseMod','OODN','DBN'};
-marcadores = {'^','s','o'};
-figure; hold on; grid on; box on;
-set(gca,'YScale','log');
-barra = waitbar(0,'Simulando...');
-
-% Criar as tabelas para salvar os resultados
-dados_teoricos = table(SNR_dB(:),'VariableNames', {'SNR_dB'});
-dados_MC = table(SNR_MC(:),'VariableNames', {'SNR_dB'});
-
-% Repetir os calculos para N = 20 e N = 100
-for j = 1:length(N_valores)
-    N = N_valores(j);
-
-    % 3. Calcular a BEP teorica da NoiseMod e da OODN
-    BEP_NoiseMod = 0.5*(gammainc(N*lambda_NoiseMod./v0_NoiseMod,N,'upper') + ...
-                       gammainc(N*lambda_NoiseMod./v1_NoiseMod,N,'lower'));
-    BEP_OODN = 0.5*(gammainc(N*lambda_OODN./v0_OODN,N,'upper') + ...
-                    gammainc(N*lambda_OODN./v1_OODN,N,'lower'));
-
-    % 4. Calcular a BEP aproximada da DBN pela integral (Eq. 3.10)
-    % x = Eu/(N*sigma_u^2) possui distribuicao Gama(N,1/N)
-    PDF = @(x) exp(N*log(N)-gammaln(N)+(N-1)*log(x)-N*x);
-    BEP_DBN = zeros(size(SNR_dB));
-
-    for i = 1:length(SNR_dB)
-        E = @(x) N*SNR_linear(i).*x;
-        BEP_DBN(i) = integral(@(x) 0.5*erfc(E(x)./ ...
-            sqrt(2*E(x)+N)).*PDF(x),0,Inf,'AbsTol',1e-14,'RelTol',1e-8);
-    end
-
-    % Aproximacao simplificada da DBN (Eq. 3.11)
-    BEP_DBN_aprox = 0.5*erfc(sqrt(N)*SNR_linear./sqrt(2*SNR_linear+1));
-
-    % 5. Inicializar os contadores de erros de Monte Carlo
-    erros_NoiseMod = zeros(size(SNR_MC));
-    erros_OODN = zeros(size(SNR_MC));
-    erros_DBN = zeros(size(SNR_MC));
-
-    for inicio = 1:bloco:N_bits
-        n_bits = min(bloco,N_bits-inicio+1);
-
-        % Gerar bits e energias aleatorias Gama(N,1)
-        % As mesmas realizacoes sao usadas nos diferentes pontos de SNR
-        bits_tx = randi([0 1],n_bits,1);
-        G = randg(N,n_bits,1);
-        A = randg(N,n_bits,1);
-        C = randg(N,n_bits,1);
-
-        for i = 1:length(SNR_MC)
-            p = pontos(i);
-            gamma = SNR_linear(p);
-
-            % 6. NoiseMod: gerar a energia recebida e detectar os bits
-            v = v0_NoiseMod(p)*(1-bits_tx) + v1_NoiseMod(p)*bits_tx;
-            T = v.*G/N;
-            bits_rx = T >= lambda_NoiseMod(p);
-            erros_NoiseMod(i) = erros_NoiseMod(i) + sum(bits_rx ~= bits_tx);
-
-            % 7. OODN: gerar a energia recebida e detectar os bits
-            v = v0_OODN(p)*(1-bits_tx) + v1_OODN(p)*bits_tx;
-            T = v.*G/N;
-            bits_rx = T >= lambda_OODN(p);
-            erros_OODN(i) = erros_OODN(i) + sum(bits_rx ~= bits_tx);
-
-            % 8. DBN: evento de erro exato do detector diferencial
-            % A e C representam energias independentes de soma e diferenca
-            % dos simbolos recebidos, normalizadas pela variancia.
-            erros_DBN(i) = erros_DBN(i) + sum((1+2*gamma)*A < C);
-        end
-
-        % Atualizar a barra de progresso
-        waitbar(((j-1)+(inicio+n_bits-1)/N_bits)/length(N_valores),barra);
-    end
-
-    % 9. Calcular a BEP simulada
-    BEP_MC = [erros_NoiseMod; erros_OODN; erros_DBN]/N_bits;
-    BEP_MC(BEP_MC == 0) = NaN;  % Omitir zeros no eixo logaritmico
-    BEP_teorica = [BEP_NoiseMod; BEP_OODN; BEP_DBN];
-
-    % 10. Guardar os resultados nas tabelas
-    for k = 1:3
-        coluna = sprintf('%s_N%d',nomes{k},N);
-        dados_teoricos.(coluna) = BEP_teorica(k,:).';
-        coluna = sprintf('%s_N%d_MC',nomes{k},N);
-        dados_MC.(coluna) = BEP_MC(k,:).';
-    end
-    coluna = sprintf('DBN_N%d_aprox',N);
-    dados_teoricos.(coluna) = BEP_DBN_aprox(:);
-
-    % 11. Plotar as curvas teoricas e simuladas
-    if N == 20
-        estilo = '-';
-    else
-        estilo = '--';
-    end
-
-    for k = 1:3
-        cor = cores(3*(j-1)+k,:);
-        semilogy(SNR_dB,BEP_teorica(k,:),'k','LineStyle',estilo, ...
-            'Marker',marcadores{k},'MarkerIndices',pontos, ...
-            'MarkerFaceColor','w','HandleVisibility','off');
-        semilogy(SNR_MC,BEP_MC(k,:),'Color',cor,'LineStyle',estilo, ...
-            'Marker',marcadores{k},'MarkerFaceColor',cor, ...
-            'DisplayName',sprintf('%s, N=%d',nomes{k},N));
-    end
-
-    curva = semilogy(SNR_dB,BEP_DBN_aprox,'r:', ...
-        'DisplayName','DBN (aprox.)');
-    if j == 1
-        curva.HandleVisibility = 'off';
-    end
-end
-
-close(barra);
-xlabel('$\bar{\gamma}$ (dB)','Interpreter','latex');
-ylabel('BEP');
-xlim([-10 10]); ylim([1e-5 0.5]);
-legend('Location','northeast');
-
-
-% 12. Salvar os resultados e a figura
-% Os arquivos ficam na pasta em que o script esta salvo
+nome_canal = 'AWGN';
 pasta = fileparts(mfilename('fullpath'));
-if isempty(pasta)
-    pasta = pwd;
+cores = [228 117 0;32 147 46;19 112 185;174 37 65;114 48 129;204 77 25]/255;
+nomes = {'NoiseMod','OODN','DBN'};
+marcas = {'^','s','o'};
+estilos = {'-','--'};
+figure('Color','w');
+H = 1; W = 1;
+hold on; grid on; box on; set(gca,'YScale','log');
+dados = table(SNR_dB(:),'VariableNames',{'SNR_dB'});
+dados_MC = table(pontos_MC(:),'VariableNames',{'SNR_dB'});
+for j = 1:numel(N_valores)
+    % 2. Calcular as curvas teoricas
+    bep = zeros(numel(SNR_dB),3);
+    N = N_valores(j);
+    for i = 1:numel(SNR_dB)
+        bep(i,:) = teoria(N,10^(SNR_dB(i)/10),H,W,alpha,1);
+    end
+    % 3. Simular em blocos e contar os erros de cada detector
+    erros = zeros(numel(pontos_MC),3);
+    for inicio = 1:bloco:N_bits
+        m = min(bloco,N_bits-inicio+1);
+        bits = randi([0 1],m,1);
+        ganho = 1;
+        G = randg(N,m,1);
+        A = randg(N,m,1);
+        C = randg(N,m,1);
+        for i = 1:numel(pontos_MC)
+            s = 10^(pontos_MC(i)/10)*ganho;
+            q = 1;
+            % Variancias de sinal para bit 0 e bit 1, em cada modulacao.
+            pot0 = [2/(1+alpha) 0]; pot1 = [2*alpha/(1+alpha) 2];
+            for k = 1:2
+                v = 1+s.*(pot0(k)+(pot1(k)-pot0(k))*bits);
+                T = v.*G/N;
+                erros(i,k) = erros(i,k)+nnz((T >= limiar(s,pot0(k),pot1(k),q)) ~= bits);
+            end
+            erro_DBN = (1+2*s).*A < C;
+            erros(i,3) = erros(i,3)+nnz(erro_DBN);
+        end
+    end
+    % 4. Guardar os dados e tracar as curvas
+    mc = erros/N_bits;
+    legenda = sprintf('N=%d',N);
+    sufixo = sprintf('N%d',N);
+    for k = 1:3
+        nome = [nomes{k} '_' sufixo];
+        dados.(nome) = bep(:,k);
+        dados_MC.([nome '_MC']) = mc(:,k);
+        y = mc(:,k); y(y==0) = NaN;
+        cor = cores(3*(j-1)+k,:);
+        plot(SNR_dB,bep(:,k),'k','LineStyle',estilos{j}, ...
+            'Marker',marcas{k},'MarkerIndices',1:4:numel(SNR_dB), ...
+            'MarkerFaceColor','w','HandleVisibility','off');
+        plot(pontos_MC,y,'Color',cor,'LineStyle',estilos{j}, ...
+            'Marker',marcas{k},'MarkerFaceColor',cor, ...
+            'DisplayName',[nomes{k} ', ' legenda]);
+    end
+    g = 10.^(SNR_dB(:)/10);
+    aprox = 0.5*erfc(sqrt(N(:)).*g./sqrt(2*g+1));
+    dados.(['DBN_aprox_' sufixo]) = aprox;
+    curva = plot(SNR_dB,aprox,'r:','DisplayName','DBN (aprox.)');
+    if j==1, curva.HandleVisibility = 'off'; end
 end
-
-writetable(dados_teoricos,fullfile(pasta,'fig1_Teorica.dat'), ...
-    'FileType','text','Delimiter',' ');
-writetable(dados_MC,fullfile(pasta,'fig1_Pontos_MC.dat'), ...
-    'FileType','text','Delimiter',' ');
-
+xlabel('SNR média por amostra (dB)'); ylabel('BEP'); title(nome_canal);
+xlim([SNR_dB(1) SNR_dB(end)]); ylim([1e-5 0.5]);
+legend('Location','best','FontSize',8);
+prefixo = fullfile(pasta,['figura_5_2_' nome_canal]);
+writetable(dados,[prefixo '_teorica.dat'],'FileType','text','Delimiter',' ');
+writetable(dados_MC,[prefixo '_MC.dat'],'FileType','text','Delimiter',' ');
 savefig(gcf,fullfile(pasta,'figura_5_2.fig'));
 exportgraphics(gcf,fullfile(pasta,'figura_5_2.pdf'),'ContentType','vector');
 exportgraphics(gcf,fullfile(pasta,'figura_5_2.png'),'Resolution',300);
 
-disp('Arquivos salvos em:');
-disp(pasta);
+function bep = teoria(N,g,H,W,alpha,q)
+% NoiseMod e OODN: BEP condicional integrada sobre o canal.
+s = g*H;
+pot0 = [2/(1+alpha) 0];
+pot1 = [2*alpha/(1+alpha) 2];
+bep = zeros(1,3);
+for k = 1:2
+    lambda = limiar(s,pot0(k),pot1(k),q);
+    p0 = gammainc(N*lambda./(1+pot0(k)*s),N,'upper');
+    p1 = gammainc(N*lambda./(1+pot1(k)*s),N,'lower');
+    bep(k) = W'*(p0+p1)/2;
+end
+% DBN: media da aproximacao gaussiana sobre a energia e o canal.
+[E,peso] = energyNodes(N,160);
+sinal = E*s';
+bep(3) = peso'*(0.5*erfc(sinal./sqrt(2*sinal+N)))*W;
+end
+
+function lambda = limiar(s,p0,p1,q)
+% Limiar da energia media, com potencia de ruido estimada q.
+v0 = q+p0*s;
+v1 = q+p1*s;
+d = (p1-p0)*s./v0;
+r = ones(size(d));
+idx = d>0;
+r(idx) = log1p(d(idx))./d(idx);
+lambda = v1.*r;
+end
+
+function [x,w] = energyNodes(N,ordem)
+% Media sobre uma energia Gama(N,1) por quadratura de Gauss-Laguerre.
+% Guardar os pesos evita repetir a decomposicao para o mesmo N.
+persistent chaves nos pesos
+if isempty(chaves)
+    chaves = zeros(0,2);
+    nos = {};
+    pesos = {};
+end
+idx = find(all(chaves == [N ordem],2),1);
+if ~isempty(idx)
+    x = nos{idx}; w = pesos{idx};
+    return;
+end
+i = (1:ordem)';
+j = (1:ordem-1)';
+b = sqrt(j.*(j+N-1));
+[V,D] = eig(diag(2*i+N-2)+diag(b,1)+diag(b,-1));
+[x,idx] = sort(diag(D));
+w = V(1,idx)'.^2;
+w = w/sum(w);
+chaves(end+1,:) = [N ordem];
+nos{end+1} = x;
+pesos{end+1} = w;
+end
